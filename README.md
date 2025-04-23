@@ -34,7 +34,7 @@ Jito Shredstream Client 是一个专门设计用来与 Jito 协议交互的客�
 
 1. 克隆仓库：
 ```bash
-git clone [repository-url]
+git clone https://github.com/vnxfsc/Jito_Shredstream_Client.git
 cd jito-shredstream-client
 ```
 
