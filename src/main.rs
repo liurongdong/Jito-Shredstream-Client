@@ -10,6 +10,10 @@ use solana_sdk::{
 use ed25519_dalek::{PublicKey, Signature as EdSignature};
 use anyhow::Result;
 use chrono::Local;
+use tonic::transport::Channel;
+use tokio::time::Duration;
+use std::collections::VecDeque;
+use futures::future::try_join_all;
 
 #[derive(Debug)]
 struct CreateEventInstruction {
@@ -26,20 +30,26 @@ struct BuyInstruction {
 }
 
 async fn verify_signatures(tx: &VersionedTransaction) -> Result<()> {
-    // 验证所有签名
-    for (i, signature) in tx.signatures.iter().enumerate() {
-        let message = tx.message.serialize();
+    let message = tx.message.serialize();
+    let futures = tx.signatures.iter().enumerate().map(|(i, signature)| {
+        let message = message.clone();
         let pubkey = tx.message.static_account_keys()[i];
+        let signature = signature.clone();
         
-        // 使用 ed25519_dalek 进行签名验证
-        let public_key = PublicKey::from_bytes(&pubkey.to_bytes())?;
-        let signature_bytes: [u8; 64] = signature.as_ref().try_into().map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
-        let ed_signature = EdSignature::from_bytes(&signature_bytes)?;
-        
-        if !public_key.verify_strict(&message, &ed_signature).is_ok() {
-            return Err(anyhow::anyhow!("Signature verification failed for signature {}", i));
-        }
-    }
+        tokio::spawn(async move {
+            let public_key = PublicKey::from_bytes(&pubkey.to_bytes())?;
+            let signature_bytes: [u8; 64] = signature.as_ref().try_into().map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
+            let ed_signature = EdSignature::from_bytes(&signature_bytes)?;
+            
+            if !public_key.verify_strict(&message, &ed_signature).is_ok() {
+                Err(anyhow::anyhow!("Signature verification failed for signature {}", i))
+            } else {
+                Ok(())
+            }
+        })
+    });
+    
+    try_join_all(futures).await?;
     Ok(())
 }
 
@@ -159,66 +169,107 @@ fn parse_instruction_data(data: &[u8]) -> Result<(String, Option<CreateEventInst
     }
 }
 
+async fn process_transaction_batch(batch: &[VersionedTransaction]) -> Result<()> {
+    let mut futures = Vec::new();
+    
+    for tx in batch {
+        let tx_clone = tx.clone();
+        futures.push(tokio::spawn(async move {
+            if let Err(e) = verify_signatures(&tx_clone).await {
+                println!("[{}] Signature verification failed: {}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), e);
+                return Err(e);
+            }
+            
+            let sig = tx_clone.signatures[0];
+            let mint = tx_clone.message.static_account_keys()[1];
+            print_versioned_transaction(&tx_clone, sig, mint).await;
+            
+            for instruction in tx_clone.message.instructions().iter() {
+                match parse_instruction_data(&instruction.data) {
+                    Ok((instruction_type, create_event, buy)) => {
+                        match instruction_type.as_str() {
+                            "CreateEvent" => {
+                                if let Some(event) = create_event {
+                                    println!("[{}] CreateEvent Instruction: {:?}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), event);
+                                }
+                            }
+                            "Buy" => {
+                                if let Some(buy) = buy {
+                                    println!("[{}] Buy Instruction: {:?}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), buy);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(e) => {
+                        println!("[{}] Failed to parse instruction: {}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), e);
+                    }
+                }
+            }
+            Ok(())
+        }));
+    }
+    
+    try_join_all(futures).await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = ShredstreamProxyClient::connect("http://45.77.55.124:9999")
+    // 配置连接
+    let channel = Channel::from_static("http://45.77.55.124:9999")
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(10))
+        .tcp_nodelay(true)
+        .tcp_keepalive(Some(Duration::from_secs(60)))
+        .connect()
         .await?;
+
+    let mut client = ShredstreamProxyClient::new(channel);
+    
     let mut stream = client
         .subscribe_entries(SubscribeEntriesRequest {})
         .await?
         .into_inner();
 
-    while let Some(slot_entry) = stream.message().await? {
-        let entries = match bincode::deserialize::<Vec<solana_entry::entry::Entry>>(&slot_entry.entries) {
-            Ok(e) => e,
-            Err(e) => {
-                println!("Deserialization failed with err: {e}");
-                continue;
-            }
-        };
+    const BATCH_SIZE: usize = 100;
+    let mut tx_queue: VecDeque<VersionedTransaction> = VecDeque::with_capacity(BATCH_SIZE);
 
+    while let Some(slot_entry) = stream.message().await? {
+        let entries_data = slot_entry.entries.clone();
+        let entries = tokio::task::spawn_blocking(move || {
+            bincode::deserialize::<Vec<solana_entry::entry::Entry>>(&entries_data)
+        }).await??;
+
+        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         println!(
-            "slot {}, entries: {}, transactions: {}",
+            "[{}] slot {}, entries: {}, transactions: {}",
+            timestamp,
             slot_entry.slot,
             entries.len(),
             entries.iter().map(|e| e.transactions.len()).sum::<usize>()
         );
 
+        // 收集事务到队列
         for entry in entries {
-            for (_i, tx) in entry.transactions.iter().enumerate() {
-                if let Err(e) = verify_signatures(tx).await {
-                    println!("Signature verification failed: {}", e);
-                    continue;
-                }
+            for tx in entry.transactions.iter() {
+                tx_queue.push_back(tx.clone());
                 
-                // 打印交易信息
-                print_versioned_transaction(&tx, tx.signatures[0], tx.message.static_account_keys()[1]).await;
-                
-                // 解析指令数据
-                let instructions = tx.message.instructions();
-                for instruction in instructions.iter() {
-                    match parse_instruction_data(&instruction.data) {
-                        Ok((instruction_type, create_event, buy)) => {
-                            match instruction_type.as_str() {
-                                "CreateEvent" => {
-                                    if let Some(event) = create_event {
-                                        println!("CreateEvent Instruction: {:?}", event);
-                                    }
-                                }
-                                "Buy" => {
-                                    if let Some(buy) = buy {
-                                        println!("Buy Instruction: {:?}", buy);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        Err(e) => {
-                            // 打印解析错误但继续处理其他指令
-                            println!("Failed to parse instruction: {}", e);
-                        }
+                // 当队列达到批量大小时处理
+                if tx_queue.len() >= BATCH_SIZE {
+                    let batch: Vec<VersionedTransaction> = tx_queue.drain(..).collect();
+                    if let Err(e) = process_transaction_batch(&batch).await {
+                        println!("[{}] Error processing batch: {}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), e);
                     }
                 }
+            }
+        }
+
+        // 处理剩余的事务
+        if !tx_queue.is_empty() {
+            let batch: Vec<VersionedTransaction> = tx_queue.drain(..).collect();
+            if let Err(e) = process_transaction_batch(&batch).await {
+                println!("[{}] Error processing final batch: {}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), e);
             }
         }
     }
