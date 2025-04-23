@@ -1,154 +1,56 @@
-use std::str;
+use solana_sdk::pubkey::Pubkey;
+use std::error::Error;
 
-pub struct InstructionParser;
+#[derive(Debug)]
+pub struct CreateEventInstruction {
+    pub name: String,
+    pub symbol: String,
+    pub uri: String,
+    pub user: Pubkey,
+}
 
-impl InstructionParser {
-    pub fn parse_instruction(program_id: &str, data: &[u8]) -> String {
-        match program_id {
-            "ComputeBudget111111111111111111111111111111" => Self::parse_compute_budget(data),
-            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" => Self::parse_pump_fun(data),
-            "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL" => Self::parse_token_account(data),
-            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" => Self::parse_token_program(data),
-            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s" => Self::parse_metadata_program(data),
-            "11111111111111111111111111111111" => Self::parse_system_program(data),
-            _ => format!("未知指令: {:?}", data),
-        }
-    }
+#[derive(Debug)]
+pub struct BuyInstruction {
+    pub amount: u64,
+    pub max_sol_cost: u64,
+}
 
-    fn parse_compute_budget(data: &[u8]) -> String {
-        if data.is_empty() {
-            return "空计算预算指令".to_string();
-        }
+pub fn parse_instruction_data(data: &[u8]) -> Result<(String, Option<CreateEventInstruction>, Option<BuyInstruction>), Box<dyn Error>> {
+    let discriminator = &data[0..8];
+    
+    match discriminator {
+        [0x18, 0x1e, 0xc8, 0x28, 0x05, 0x1c, 0x07, 0x77] => {
+            let mut offset = 8;
+            let name_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let name = String::from_utf8(data[offset..offset + name_len].to_vec())?;
+            offset += name_len;
 
-        match data[0] {
-            2 => format!("设置计算预算: {} 单位", u32::from_le_bytes([data[1], data[2], data[3], data[4]])),
-            3 => format!("设置计算单元价格: {} lamports/单位", u64::from_le_bytes([data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]])),
-            _ => format!("未知计算预算指令: {:?}", data),
-        }
-    }
+            let symbol_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let symbol = String::from_utf8(data[offset..offset + symbol_len].to_vec())?;
+            offset += symbol_len;
 
-    fn parse_pump_fun(data: &[u8]) -> String {
-        if data.len() < 8 {
-            return format!("无效的Pump.fun指令: {:?}", data);
-        }
+            let uri_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let uri = String::from_utf8(data[offset..offset + uri_len].to_vec())?;
+            offset += uri_len;
 
-        match data[0] {
-            24 => {
-                // 解析代币名称
-                let name_len = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
-                if data.len() < 12 + name_len {
-                    return format!("无效的代币名称长度: {}", name_len);
-                }
-                let name = str::from_utf8(&data[12..12 + name_len]).unwrap_or("无效名称");
+            let user = Pubkey::new_from_array(data[offset..offset + 32].try_into().unwrap());
 
-                // 解析代币符号
-                let symbol_start = 12 + name_len;
-                if data.len() < symbol_start + 4 {
-                    return format!("无效的代币符号起始位置: {}", symbol_start);
-                }
-                let symbol_len = u32::from_le_bytes([
-                    data[symbol_start],
-                    data[symbol_start + 1],
-                    data[symbol_start + 2],
-                    data[symbol_start + 3],
-                ]) as usize;
-                let symbol_end = symbol_start + 4 + symbol_len;
-                if data.len() < symbol_end {
-                    return format!("无效的代币符号长度: {}", symbol_len);
-                }
-                let symbol = str::from_utf8(&data[symbol_start + 4..symbol_end]).unwrap_or("无效符号");
-
-                // 解析代币图标URL
-                let metadata_url_start = symbol_end;
-                if data.len() < metadata_url_start + 4 {
-                    return format!("无效的metadata_url起始位置: {}", metadata_url_start);
-                }
-                let metadata_url_len = u32::from_le_bytes([
-                    data[metadata_url_start],
-                    data[metadata_url_start + 1],
-                    data[metadata_url_start + 2],
-                    data[metadata_url_start + 3],
-                ]) as usize;
-                let metadata_url_end = metadata_url_start + 4 + metadata_url_len;
-                if data.len() < metadata_url_end {
-                    return format!("无效的metadata_url长度: {}", metadata_url_len);
-                }
-                let metadata_url = str::from_utf8(&data[metadata_url_start + 4..metadata_url_end]).unwrap_or("无效metadata_url");
-
-                format!("Token_Metadata:\n  name: {}\n  symbol: {}\n  metadata_url: {}", name, symbol, metadata_url)
-            },
-            234 => "初始化代币账户".to_string(),
-            102 => "设置代币元数据".to_string(),
-            // 买入指令
-            25 => {
-                if data.len() < 16 {
-                    return "无效的买入指令".to_string();
-                }
-                let amount = u64::from_le_bytes([
-                    data[8], data[9], data[10], data[11],
-                    data[12], data[13], data[14], data[15],
-                ]);
-                format!("买入代币: {} 单位", amount)
-            },
-            // 卖出指令
-            26 => {
-                if data.len() < 16 {
-                    return "无效的卖出指令".to_string();
-                }
-                let amount = u64::from_le_bytes([
-                    data[8], data[9], data[10], data[11],
-                    data[12], data[13], data[14], data[15],
-                ]);
-                format!("卖出代币: {} 单位", amount)
-            },
-            _ => format!("未知Pump.fun指令: {:?}", data),
-        }
-    }
-
-    fn parse_token_account(data: &[u8]) -> String {
-        match data {
-            [1] => "创建代币账户".to_string(),
-            [2] => "创建代币账户(幂等)".to_string(),
-            _ => format!("未知代币账户指令: {:?}", data),
-        }
-    }
-
-    fn parse_token_program(data: &[u8]) -> String {
-        if data.is_empty() {
-            return "空代币程序指令".to_string();
+            let instruction = CreateEventInstruction { name, symbol, uri, user};
+            Ok(("CreateEvent".to_string(), Some(instruction), None))
         }
 
-        match data[0] {
-            7 => "初始化代币账户".to_string(),
-            8 => "转账代币".to_string(),
-            9 => "关闭代币账户".to_string(),
-            14 => "铸造代币".to_string(),
-            _ => format!("未知代币程序指令: {:?}", data),
-        }
-    }
+        [0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea] => {
+            let mut offset = 8;
+            let amount = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+            offset += 8;
+            let max_sol_cost = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
 
-    fn parse_metadata_program(data: &[u8]) -> String {
-        if data.is_empty() {
-            return "空元数据程序指令".to_string();
+            let instruction = BuyInstruction { amount, max_sol_cost };
+            Ok(("Buy".to_string(), None, Some(instruction)))
         }
-
-        match data[0] {
-            33 => "创建元数据账户 v3".to_string(),
-            34 => "更新元数据账户 v2".to_string(),
-            _ => format!("未知元数据程序指令: {:?}", data),
-        }
-    }
-
-    fn parse_system_program(data: &[u8]) -> String {
-        if data.is_empty() {
-            return "空系统程序指令".to_string();
-        }
-
-        match data[0] {
-            0 => "创建账户".to_string(),
-            2 => "转账SOL".to_string(),
-            8 => "分配空间".to_string(),
-            _ => format!("未知系统程序指令: {:?}", data),
-        }
+        _ => Err("Unknown instruction data".into()),
     }
 } 
