@@ -6,6 +6,10 @@
 
 Jito Shredstream Client 是一个专门设计用来与 Jito 协议交互的客户端库，它基于 Solana 区块链技术构建，提供了高效的数据流处理能力。
 
+## 运行效果
+
+![运行效果图](./assets/1.png)
+
 ## 技术栈
 
 - Rust 2024 edition
