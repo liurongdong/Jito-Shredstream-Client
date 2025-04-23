@@ -59,23 +59,23 @@ impl InstructionParser {
                 let symbol = str::from_utf8(&data[symbol_start + 4..symbol_end]).unwrap_or("无效符号");
 
                 // 解析代币图标URL
-                let icon_start = symbol_end;
-                if data.len() < icon_start + 4 {
-                    return format!("无效的图标URL起始位置: {}", icon_start);
+                let metadata_url_start = symbol_end;
+                if data.len() < metadata_url_start + 4 {
+                    return format!("无效的metadata_url起始位置: {}", metadata_url_start);
                 }
-                let icon_len = u32::from_le_bytes([
-                    data[icon_start],
-                    data[icon_start + 1],
-                    data[icon_start + 2],
-                    data[icon_start + 3],
+                let metadata_url_len = u32::from_le_bytes([
+                    data[metadata_url_start],
+                    data[metadata_url_start + 1],
+                    data[metadata_url_start + 2],
+                    data[metadata_url_start + 3],
                 ]) as usize;
-                let icon_end = icon_start + 4 + icon_len;
-                if data.len() < icon_end {
-                    return format!("无效的图标URL长度: {}", icon_len);
+                let metadata_url_end = metadata_url_start + 4 + metadata_url_len;
+                if data.len() < metadata_url_end {
+                    return format!("无效的metadata_url长度: {}", metadata_url_len);
                 }
-                let icon = str::from_utf8(&data[icon_start + 4..icon_end]).unwrap_or("无效图标URL");
+                let metadata_url = str::from_utf8(&data[metadata_url_start + 4..metadata_url_end]).unwrap_or("无效metadata_url");
 
-                format!("Token_Metadata:\n  name: {}\n  symbol: {}\n  uri: {}", name, symbol, icon)
+                format!("Token_Metadata:\n  name: {}\n  symbol: {}\n  metadata_url: {}", name, symbol, metadata_url)
             },
             234 => "初始化代币账户".to_string(),
             102 => "设置代币元数据".to_string(),
