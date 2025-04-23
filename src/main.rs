@@ -9,6 +9,7 @@ use solana_sdk::{
 };
 use ed25519_dalek::{PublicKey, Signature as EdSignature};
 use anyhow::Result;
+use chrono::Local;
 
 #[derive(Debug)]
 struct CreateEventInstruction {
@@ -54,13 +55,15 @@ async fn print_versioned_transaction(tx: &VersionedTransaction, sig: Signature, 
 }
 
 async fn print_legacy_message(msg: &solana_sdk::message::Message, sig: Signature, mint: Pubkey) {
-    println!("Legacy Message - Signature: {}, Mint: {}", sig, mint);
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    println!("[{}] Legacy Message - Signature: {}, Mint: {}", timestamp, sig, mint);
     println!("Account Keys: {:?}", msg.account_keys);
     println!("Instructions: {:?}", msg.instructions);
 }
 
 async fn print_v0_message(msg: &solana_sdk::message::v0::Message, sig: Signature, mint: Pubkey) {
-    println!("V0 Message - Signature: {}, Mint: {}", sig, mint);
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    println!("[{}] V0 Message - Signature: {}, Mint: {}", timestamp, sig, mint);
     println!("Account Keys: {:?}", msg.account_keys);
     println!("Instructions: {:?}", msg.instructions);
 }
