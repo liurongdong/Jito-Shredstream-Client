@@ -2,16 +2,16 @@ mod config;
 mod client;
 mod processor;
 mod utils;
+mod instruction;
 
 use config::Config;
 use client::ShredstreamClient;
 use processor::TransactionProcessor;
 use utils::deserialize_entries;
-use std::time::Duration;
-use tokio::time::sleep;
+use std::error::Error;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::new();
     let mut client = ShredstreamClient::new(config.clone()).await?;
     let processor = TransactionProcessor::new(config.token_creator_pubkey);
@@ -21,15 +21,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(mut stream) => {
                 while let Some(entry) = stream.message().await? {
                     match deserialize_entries(&entry.entries) {
-                        Ok(entries) => processor.process_entries(entries, entry.slot),
-                        Err(e) => println!("反序列化失败: {e}"),
+                        Ok(entries) => processor.process_entries(entries, entry.slot)?,
+                        Err(e) => {
+                            println!("反序列化失败: {e}");
+                            continue;
+                        }
                     }
                 }
             }
             Err(e) => {
                 println!("连接断开: {e}");
                 println!("5秒后重新连接...");
-                sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }
         }
     }
