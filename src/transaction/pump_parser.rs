@@ -7,6 +7,21 @@ use borsh::BorshDeserialize;
 // Pump程序ID
 pub const PUMP_PROGRAM_ID: &str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 
+// Pump指令编号常量
+pub const INITIALIZE_IX: u8 = 0;
+pub const SET_PARAMS_IX: u8 = 1;
+pub const CREATE_IX: u8 = 2;
+pub const BUY_IX: u8 = 3;
+pub const SELL_IX: u8 = 4;
+pub const WITHDRAW_IX: u8 = 5;
+pub const CREATE_COIN_IX: u8 = 24;
+pub const BUY_TOKENS_IX: u8 = 102;
+pub const SWAP_IX: u8 = 103;
+pub const SELL_TOKENS_IX: u8 = 104;
+pub const EXTENDED_SELL_IX: u8 = 51;
+pub const INIT_IX: u8 = 234;
+pub const COMPLETE_IX: u8 = 200; // 假设200是完成指令的编号，可能需要调整
+
 // 指令类型
 #[derive(Debug)]
 pub enum PumpInstructionType {
@@ -22,6 +37,7 @@ pub enum PumpInstructionType {
     Swap,          // 103 指令 - 交换代币
     SellTokens,    // 104 指令 - 出售代币
     ExtendedSell,  // 51 指令 - 扩展版出售代币
+    Complete,      // 曲线完成指令
     Init,          // 234 指令 - 初始化操作
     Unknown(()),   // 未知指令，使用()替代u8以避免dead_code警告
 }
@@ -33,6 +49,40 @@ pub struct ParsedPumpInstruction {
     pub instruction_type: PumpInstructionType,
     pub name: String,
     pub params: String,
+}
+
+// 解析后的曲线状态信息
+#[derive(Debug)]
+pub struct BondingCurveInfo {
+    pub mint: Pubkey,
+    pub curve_account: Pubkey,
+    pub is_complete: bool,
+    #[allow(dead_code)]
+    pub virtual_token_reserves: Option<u64>,
+    #[allow(dead_code)]
+    pub virtual_sol_reserves: Option<u64>,
+    #[allow(dead_code)]
+    pub real_token_reserves: Option<u64>,
+    #[allow(dead_code)]
+    pub real_sol_reserves: Option<u64>,
+}
+
+// 解析后的CompleteEvent
+#[derive(Debug)]
+pub struct CompleteEvent {
+    pub user: Pubkey,
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub timestamp: u64,
+}
+
+// CompleteEvent反序列化结构体
+#[derive(BorshDeserialize, Debug)]
+struct CompleteEventArgs {
+    user: [u8; 32],
+    mint: [u8; 32],
+    bonding_curve: [u8; 32],
+    timestamp: u64,
 }
 
 // Borsh反序列化结构体
@@ -226,10 +276,46 @@ fn parse_swap_args(data: &[u8]) -> Option<String> {
     Some(format!("交换代币: 输入数量={}, 最小输出数量={}", in_amount, min_out_amount))
 }
 
-// 将lamports转换为可读的SOL格式
-fn lamports_to_sol_string(lamports: u64) -> String {
+/// 解析Complete事件数据
+pub fn parse_complete_event(data: &[u8]) -> Option<CompleteEvent> {
+    if data.len() < 8 + std::mem::size_of::<CompleteEventArgs>() {
+        return None;
+    }
+
+    if let Ok(args) = CompleteEventArgs::try_from_slice(&data[8..]) {
+        let user = Pubkey::new_from_array(args.user);
+        let mint = Pubkey::new_from_array(args.mint);
+        let bonding_curve = Pubkey::new_from_array(args.bonding_curve);
+        let timestamp = args.timestamp;
+        
+        Some(CompleteEvent {
+            user,
+            mint,
+            bonding_curve,
+            timestamp,
+        })
+    } else {
+        None
+    }
+}
+
+/// 格式化时间戳为可读格式
+pub fn format_timestamp(timestamp: u64) -> String {
+    let seconds = (timestamp / 1000) as i64;
+    let nanos = ((timestamp % 1000) * 1_000_000) as u32;
+    
+    // 使用当前版本的chrono
+    if let Some(datetime) = chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, nanos) {
+        datetime.format("时间戳=%Y-%m-%d %H:%M:%S").to_string()
+    } else {
+        format!("时间戳={}", timestamp)
+    }
+}
+
+/// 将lamports转换为SOL字符串
+pub fn lamports_to_sol_string(lamports: u64) -> String {
     let sol = lamports as f64 / 1_000_000_000.0;
-    format!("{:.9} SOL ({} lamports)", sol, lamports)
+    format!("{:.9} SOL", sol)
 }
 
 pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_index: usize) -> Option<ParsedPumpInstruction> {
@@ -256,7 +342,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
     let discriminator = instruction.data[0];
     
     match discriminator {
-        0 => {
+        INITIALIZE_IX => {
             // Initialize
             Some(ParsedPumpInstruction {
                 instruction_type: PumpInstructionType::Initialize,
@@ -264,7 +350,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 params: "初始化全局状态".to_string(),
             })
         },
-        1 => {
+        SET_PARAMS_IX => {
             // SetParams
             if let Ok(args) = SetParamsArgs::try_from_slice(&instruction.data[8..]) {
                 let fee_recipient = Pubkey::new_from_array(args.fee_recipient);
@@ -289,7 +375,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        2 => {
+        CREATE_IX => {
             // Create
             if let Ok(args) = CreateArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -308,7 +394,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        3 => {
+        BUY_IX => {
             // Buy
             if let Ok(args) = BuyArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -327,7 +413,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        4 => {
+        SELL_IX => {
             // Sell
             if let Ok(args) = SellArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -346,7 +432,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        5 => {
+        WITHDRAW_IX => {
             // Withdraw
             Some(ParsedPumpInstruction {
                 instruction_type: PumpInstructionType::Withdraw,
@@ -354,7 +440,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 params: "提取流动性".to_string(),
             })
         },
-        24 => {
+        CREATE_COIN_IX => {
             // CreateCoin - 观察到的自定义指令
             let params = parse_create_coin_args(&instruction.data)
                 .unwrap_or_else(|| "创建代币 (无法解析参数)".to_string());
@@ -365,7 +451,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 params,
             })
         },
-        102 => {
+        BUY_TOKENS_IX => {
             // BuyTokens - 观察到的自定义指令
             if let Ok(args) = BuyArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -388,7 +474,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        103 => {
+        SWAP_IX => {
             // Swap - 交换代币
             if let Ok(args) = SwapArgs::try_from_slice(&instruction.data[8..]) {
                 let input_token = if args.input_type == 0 { "SOL" } else { "代币" };
@@ -414,7 +500,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        104 => {
+        SELL_TOKENS_IX => {
             // SellTokens - 出售代币
             if let Ok(args) = SellArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -437,15 +523,7 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
-        234 => {
-            // Init 初始化指令
-            Some(ParsedPumpInstruction {
-                instruction_type: PumpInstructionType::Init,
-                name: "Init".to_string(),
-                params: "初始化操作".to_string(),
-            })
-        },
-        51 => {
+        EXTENDED_SELL_IX => {
             // ExtendedSell - 扩展版出售代币指令
             if let Ok(args) = ExtendedSellArgs::try_from_slice(&instruction.data[8..]) {
                 Some(ParsedPumpInstruction {
@@ -484,6 +562,47 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
                 })
             }
         },
+        COMPLETE_IX => {
+            // Complete - 曲线完成指令
+            if let Some(event) = parse_complete_event(&instruction.data) {
+                Some(ParsedPumpInstruction {
+                    instruction_type: PumpInstructionType::Complete,
+                    name: "Complete".to_string(),
+                    params: format!(
+                        "曲线完成: 用户={}, 代币={}, 曲线={}, {}",
+                        event.user, event.mint, event.bonding_curve, format_timestamp(event.timestamp)
+                    ),
+                })
+            } else if let Ok(args) = CompleteEventArgs::try_from_slice(&instruction.data[8..]) {
+                let user = Pubkey::new_from_array(args.user);
+                let mint = Pubkey::new_from_array(args.mint);
+                let bonding_curve = Pubkey::new_from_array(args.bonding_curve);
+                let timestamp = args.timestamp;
+                
+                Some(ParsedPumpInstruction {
+                    instruction_type: PumpInstructionType::Complete,
+                    name: "Complete".to_string(),
+                    params: format!(
+                        "曲线完成: 用户={}, 代币={}, 曲线={}, {}",
+                        user, mint, bonding_curve, format_timestamp(timestamp)
+                    ),
+                })
+            } else {
+                Some(ParsedPumpInstruction {
+                    instruction_type: PumpInstructionType::Complete,
+                    name: "Complete".to_string(),
+                    params: "曲线完成 (数据解析失败)".to_string(),
+                })
+            }
+        },
+        INIT_IX => {
+            // Init 初始化指令
+            Some(ParsedPumpInstruction {
+                instruction_type: PumpInstructionType::Init,
+                name: "Init".to_string(),
+                params: "初始化操作".to_string(),
+            })
+        },
         _ => Some(ParsedPumpInstruction {
             instruction_type: PumpInstructionType::Unknown(()),
             name: format!("Unknown_{}", discriminator),
@@ -495,24 +614,53 @@ pub fn parse_pump_instruction(transaction: &VersionedTransaction, instruction_in
 // 获取与交易相关的Mint地址
 pub fn get_mint_from_transaction(transaction: &VersionedTransaction) -> Option<Pubkey> {
     let message = &transaction.message;
+    let static_keys = message.static_account_keys();
+    
+    // 首先尝试在账户中寻找以"pump"结尾的地址，这通常是Pump协议的代币地址
+    for key in static_keys {
+        let key_str = key.to_string();
+        if key_str.ends_with("pump") {
+            return Some(*key);
+        }
+    }
+    
+    // 如果没有找到pump结尾的地址，则尝试通过指令内容来查找
     let instructions = message.instructions();
     
     for instruction in instructions {
-        let program_id = instruction.program_id(&message.static_account_keys());
+        let program_id = instruction.program_id(&static_keys);
         
         // 如果是Pump程序指令
         if program_id.to_string() == PUMP_PROGRAM_ID {
             // 检查是创建或交易指令
             if !instruction.data.is_empty() {
                 let discriminator = instruction.data[0];
-                if discriminator == 2 || discriminator == 3 || discriminator == 4 || 
-                   discriminator == 24 || discriminator == 51 || discriminator == 102 || 
-                   discriminator == 103 || discriminator == 104 {
-                    // 在create, buy, sell等指令中，mint通常是第一个账户
+                if discriminator == CREATE_IX || discriminator == BUY_IX || discriminator == SELL_IX || 
+                   discriminator == CREATE_COIN_IX || discriminator == EXTENDED_SELL_IX || 
+                   discriminator == BUY_TOKENS_IX || discriminator == SWAP_IX || 
+                   discriminator == SELL_TOKENS_IX {
+                    
+                    // 查找指令的账户列表中与mint相关的账户
+                    // 通常mint是前几个账户之一
                     if !instruction.accounts.is_empty() {
-                        let mint_index = instruction.accounts[0] as usize;
-                        if mint_index < message.static_account_keys().len() {
-                            return Some(message.static_account_keys()[mint_index]);
+                        for (i, &account_index) in instruction.accounts.iter().enumerate().take(3) {
+                            if (account_index as usize) < static_keys.len() {
+                                let potential_mint = static_keys[account_index as usize];
+                                let key_str = potential_mint.to_string();
+                                
+                                // 如果找到以pump结尾的账户，或者是第一个账户（对于CREATE_IX）
+                                if key_str.ends_with("pump") || 
+                                   (discriminator == CREATE_IX && i == 0) {
+                                    return Some(potential_mint);
+                                }
+                            }
+                        }
+                    }
+                } else if discriminator == COMPLETE_IX {
+                    // 在Complete指令中，mint通常在事件参数中
+                    if instruction.data.len() >= 8 + 32*3 {
+                        if let Ok(args) = CompleteEventArgs::try_from_slice(&instruction.data[8..]) {
+                            return Some(Pubkey::new_from_array(args.mint));
                         }
                     }
                 }
@@ -521,6 +669,101 @@ pub fn get_mint_from_transaction(transaction: &VersionedTransaction) -> Option<P
     }
     
     None
+}
+
+// 获取与交易相关的BondingCurve信息
+pub fn get_bonding_curve_info(transaction: &VersionedTransaction) -> Option<BondingCurveInfo> {
+    let message = &transaction.message;
+    let static_keys = message.static_account_keys();
+    
+    // 首先尝试找出mint地址
+    let mint = get_mint_from_transaction(transaction)?;
+    
+    // 默认值
+    let mut result = BondingCurveInfo {
+        mint,
+        curve_account: Pubkey::default(),
+        is_complete: false,
+        virtual_token_reserves: None,
+        virtual_sol_reserves: None,
+        real_token_reserves: None,
+        real_sol_reserves: None,
+    };
+    
+    // 找到以"pump"结尾但不是mint的账户，这通常是曲线账户
+    for key in static_keys {
+        let key_str = key.to_string();
+        if key_str.ends_with("pump") && *key != mint {
+            result.curve_account = *key;
+            break;
+        }
+    }
+    
+    // 如果找不到，则尝试通过特定指令查找
+    if result.curve_account == Pubkey::default() {
+        // 查找BondingCurve账户
+        for instruction in message.instructions() {
+            let program_id = instruction.program_id(&static_keys);
+            
+            // 如果是Pump程序指令
+            if program_id.to_string() == PUMP_PROGRAM_ID && !instruction.accounts.is_empty() {
+                let discriminator = if instruction.data.is_empty() { 0 } else { instruction.data[0] };
+                
+                match discriminator {
+                    // 创建代币
+                    CREATE_IX | CREATE_COIN_IX => {
+                        if instruction.accounts.len() > 3 {
+                            let curve_index = instruction.accounts[2] as usize;
+                            if curve_index < static_keys.len() {
+                                result.curve_account = static_keys[curve_index];
+                            }
+                        }
+                    },
+                    // 买入代币
+                    BUY_IX | BUY_TOKENS_IX => {
+                        if instruction.accounts.len() > 3 {
+                            let curve_index = instruction.accounts[3] as usize;
+                            if curve_index < static_keys.len() {
+                                result.curve_account = static_keys[curve_index];
+                            }
+                        }
+                    },
+                    // 卖出代币
+                    SELL_IX | EXTENDED_SELL_IX | SELL_TOKENS_IX => {
+                        if instruction.accounts.len() > 3 {
+                            let curve_index = instruction.accounts[3] as usize;
+                            if curve_index < static_keys.len() {
+                                result.curve_account = static_keys[curve_index];
+                            }
+                        }
+                    },
+                    // 交换代币
+                    SWAP_IX => {
+                        if instruction.accounts.len() > 3 {
+                            let curve_index = instruction.accounts[3] as usize;
+                            if curve_index < static_keys.len() {
+                                result.curve_account = static_keys[curve_index];
+                            }
+                        }
+                    },
+                    // 曲线完成
+                    COMPLETE_IX => {
+                        if let Ok(args) = CompleteEventArgs::try_from_slice(&instruction.data[8..]) {
+                            result.is_complete = true;
+                            result.curve_account = Pubkey::new_from_array(args.bonding_curve);
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+    
+    if result.curve_account != Pubkey::default() {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 // 解析交易中的Pump指令
