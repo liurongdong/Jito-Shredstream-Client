@@ -1,17 +1,18 @@
-use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
+use std::env;
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct Config {
     pub server_url: String,
-    pub token_creator_pubkey: Pubkey,
+    pub target_account: String,
 }
 
-impl Config {
-    pub fn new() -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
-            server_url: "http://45.77.55.124:9999".to_string(),
-            token_creator_pubkey: Pubkey::from_str("TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM").unwrap(),
+            server_url: env::var("SHREDSTREAM_SERVER_URL")
+                .unwrap_or_else(|_| "http://45.77.55.124:9999".to_string()),
+            target_account: env::var("TARGET_ACCOUNT")
+                .unwrap_or_else(|_| "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM".to_string()),
         }
     }
 } 

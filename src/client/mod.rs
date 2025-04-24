@@ -1,66 +1,33 @@
+use tonic::transport::Channel;
 use jito_protos::shredstream::{
-    shredstream_proxy_client::ShredstreamProxyClient, SubscribeEntriesRequest, Entry,
+    shredstream_proxy_client::ShredstreamProxyClient,
+    SubscribeEntriesRequest,
 };
-use tonic::Streaming;
-use crate::config::Config;
-use std::time::Duration;
 use tokio::time::sleep;
+use std::time::Duration;
 
 pub struct ShredstreamClient {
-    client: ShredstreamProxyClient<tonic::transport::Channel>,
-    config: Config,
+    server_url: String,
 }
 
 impl ShredstreamClient {
-    pub async fn new(config: Config) -> Result<Self, Box<dyn std::error::Error>> {
-        let client = Self::connect(&config).await?;
-        Ok(Self { client, config })
+    pub fn new(server_url: String) -> Self {
+        Self { server_url }
     }
 
-    async fn connect(config: &Config) -> Result<ShredstreamProxyClient<tonic::transport::Channel>, Box<dyn std::error::Error>> {
-        let mut retries = 0;
-        let max_retries = 5;
-        let base_delay = Duration::from_secs(1);
-
-        loop {
-            match ShredstreamProxyClient::connect(config.server_url.clone()).await {
-                Ok(client) => return Ok(client),
-                Err(e) => {
-                    retries += 1;
-                    if retries >= max_retries {
-                        return Err(Box::new(e));
-                    }
-                    let delay = base_delay * retries;
-                    println!("连接失败，{}秒后重试 (第{}次)...", delay.as_secs(), retries);
-                    sleep(delay).await;
-                }
-            }
-        }
+    pub async fn connect(&self) -> Result<ShredstreamProxyClient<Channel>, tonic::transport::Error> {
+        ShredstreamProxyClient::connect(self.server_url.clone()).await
     }
 
-    pub async fn subscribe_entries(&mut self) -> Result<Streaming<Entry>, Box<dyn std::error::Error>> {
-        let mut retries = 0;
-        let max_retries = 5;
-        let base_delay = Duration::from_secs(1);
-
+    pub async fn subscribe_entries(
+        &self,
+        client: &mut ShredstreamProxyClient<Channel>
+    ) -> Result<tonic::Streaming<jito_protos::shredstream::Entry>, Box<dyn std::error::Error>> {
         loop {
-            match self.client
-                .subscribe_entries(SubscribeEntriesRequest {})
-                .await
-            {
+            let request = tonic::Request::new(SubscribeEntriesRequest {});
+            match client.subscribe_entries(request).await {
                 Ok(response) => return Ok(response.into_inner()),
-                Err(e) => {
-                    retries += 1;
-                    if retries >= max_retries {
-                        return Err(Box::new(e));
-                    }
-                    let delay = base_delay * retries;
-                    println!("订阅失败，{}秒后重试 (第{}次)...", delay.as_secs(), retries);
-                    sleep(delay).await;
-                    
-                    // 尝试重新连接
-                    self.client = Self::connect(&self.config).await?;
-                }
+                Err(_) => sleep(Duration::from_secs(5)).await,
             }
         }
     }
