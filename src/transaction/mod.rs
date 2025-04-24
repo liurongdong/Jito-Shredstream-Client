@@ -6,12 +6,37 @@ use solana_sdk::{
 use std::collections::HashMap;
 
 pub mod pump_parser;
-use pump_parser::{parse_pump_transaction, get_mint_from_transaction, PUMP_PROGRAM_ID};
+use pump_parser::{parse_pump_transaction, get_mint_from_transaction, get_bonding_curve_info, PUMP_PROGRAM_ID};
 
 pub fn print_transaction_info(transaction: &VersionedTransaction) {
     println!("\n交易详情:");
     println!("签名: {}", transaction.signatures[0]);
     println!("消息版本: {:?}", transaction.message);
+    
+    let static_keys = transaction.message.static_account_keys();
+    
+    // 打印Pump相关的特殊账户
+    println!("\nPump特殊账户:");
+    for (i, key) in static_keys.iter().enumerate() {
+        let key_str = key.to_string();
+        if key_str.ends_with("pump") {
+            println!("  {}. {} (可能的Pump账户)", i, key);
+        }
+    }
+    
+    // 打印签名账户
+    println!("\n签名账户: {}", static_keys[0]);
+    
+    // 尝试获取Mint地址
+    if let Some(mint) = pump_parser::get_mint_from_transaction(transaction) {
+        println!("\n识别的代币Mint: {}", mint);
+    }
+    
+    // 尝试获取BondingCurve信息
+    if let Some(curve_info) = pump_parser::get_bonding_curve_info(transaction) {
+        println!("识别的曲线账户: {}", curve_info.curve_account);
+        println!("曲线状态: {}", if curve_info.is_complete { "已完成" } else { "进行中" });
+    }
     
     match &transaction.message {
         VersionedMessage::Legacy(msg) => {
@@ -46,9 +71,6 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
         format!("多签名交易 ({}个签名)", num_signatures) 
     };
     println!("交易类型: {}", tx_type);
-    
-    let static_keys = message.static_account_keys();
-    println!("签名账户: {}", static_keys[0]);
     
     println!("\n指令详情:");
     for (i, instruction) in message.instructions().iter().enumerate() {
@@ -86,6 +108,14 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
                     if let Some(mint) = get_mint_from_transaction(transaction) {
                         println!("    代币Mint: {}", mint);
                     }
+                    
+                    // 尝试获取BondingCurve信息
+                    if let Some(curve_info) = get_bonding_curve_info(transaction) {
+                        println!("    曲线账户: {}", curve_info.curve_account);
+                        if curve_info.is_complete {
+                            println!("    曲线状态: 已完成");
+                        }
+                    }
                 }
             },
             _ => {
@@ -112,6 +142,14 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
             println!("  Pump指令 {}:", i + 1);
             println!("    类型: {}", instruction.name);
             println!("    详情: {}", instruction.params);
+        }
+        
+        // 添加曲线信息 
+        if let Some(curve_info) = get_bonding_curve_info(transaction) {
+            println!("\n曲线信息:");
+            println!("  代币Mint: {}", curve_info.mint);
+            println!("  曲线账户: {}", curve_info.curve_account);
+            println!("  状态: {}", if curve_info.is_complete { "已完成" } else { "进行中" });
         }
     }
 
