@@ -5,6 +5,9 @@ use solana_sdk::{
 };
 use std::collections::HashMap;
 
+pub mod pump_parser;
+use pump_parser::{parse_pump_transaction, get_mint_from_transaction, PUMP_PROGRAM_ID};
+
 pub fn print_transaction_info(transaction: &VersionedTransaction) {
     println!("\n交易详情:");
     println!("签名: {}", transaction.signatures[0]);
@@ -62,6 +65,8 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
                     match instruction.data[0] {
                         0 => println!("    操作: 设置计算单元限制"),
                         1 => println!("    操作: 设置优先级费用"),
+                        2 => println!("    操作: 设置计算单元价格"),
+                        3 => println!("    操作: 设置堆内存"),
                         _ => println!("    操作: 未知计算预算操作"),
                     }
                 }
@@ -69,8 +74,19 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
             "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL" => {
                 println!("    类型: Associated Token 指令");
             },
-            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" => {
-                println!("    类型: 自定义程序指令");
+            pump_id if pump_id == PUMP_PROGRAM_ID => {
+                println!("    类型: Pump协议指令");
+                
+                // 尝试解析pump指令
+                if let Some(parsed) = pump_parser::parse_pump_instruction(transaction, i) {
+                    println!("    操作: {}", parsed.name);
+                    println!("    内容: {}", parsed.params);
+                    
+                    // 尝试获取Mint地址
+                    if let Some(mint) = get_mint_from_transaction(transaction) {
+                        println!("    代币Mint: {}", mint);
+                    }
+                }
             },
             _ => {
                 println!("    类型: 其他程序指令");
@@ -79,16 +95,32 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
         
         println!("    相关账户:");
         for account_index in accounts {
-            println!("      - {}", static_keys[*account_index as usize]);
+            let index = *account_index as usize;
+            if index < static_keys.len() {
+                println!("      - {}", static_keys[index]);
+            } else {
+                println!("      - 无效账户索引: {}", index);
+            }
+        }
+    }
+
+    // 添加Pump指令的特殊解析
+    let parsed_pump = parse_pump_transaction(transaction);
+    if !parsed_pump.is_empty() {
+        println!("\nPump协议交易解析:");
+        for (i, instruction) in parsed_pump.iter().enumerate() {
+            println!("  Pump指令 {}:", i + 1);
+            println!("    类型: {}", instruction.name);
+            println!("    详情: {}", instruction.params);
         }
     }
 
     println!("\n{}", "-".repeat(80));
 }
 
-pub fn group_transactions_by_account<'a>(
+pub fn group_transactions_by_accounts<'a>(
     entries: &'a [solana_entry::entry::Entry],
-    target_account: &'a Pubkey
+    target_accounts: &'a [Pubkey]
 ) -> HashMap<Pubkey, Vec<&'a VersionedTransaction>> {
     let mut transactions_by_account = HashMap::new();
     
@@ -99,11 +131,13 @@ pub fn group_transactions_by_account<'a>(
                 VersionedMessage::V0(msg) => msg.account_keys.iter().collect(),
             };
             
-            if accounts.contains(&target_account) {
-                transactions_by_account
-                    .entry(*target_account)
-                    .or_insert_with(Vec::new)
-                    .push(transaction);
+            for target_account in target_accounts {
+                if accounts.contains(&target_account) {
+                    transactions_by_account
+                        .entry(*target_account)
+                        .or_insert_with(Vec::new)
+                        .push(transaction);
+                }
             }
         }
     }
