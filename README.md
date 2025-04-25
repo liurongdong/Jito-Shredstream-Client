@@ -63,7 +63,7 @@ cargo build --release
 
 系统默认通过环境变量进行配置，主要配置项包括：
 
-- `SHREDSTREAM_SERVER_URL` - Jito Shredstream 服务器地址（默认为 "http://45.77.55.124:9999"）
+- `SHREDSTREAM_SERVER_URL` - Jito Shredstream 服务器地址（默认为 "http://127.0.0.1:9999"）
 - `CREATE_ACCOUNT` - 创建代币交易相关的目标账户（默认为 "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"）
 - `SWAP_ACCOUNT` - Swap 交易相关的目标账户（默认为 "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"）
 
