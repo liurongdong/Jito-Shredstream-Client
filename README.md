@@ -38,11 +38,23 @@
 - Rust 1.65+
 - Solana SDK 1.17.0+
 - Jito Protos 依赖
+## 服务端安装教程
+```bash
+git clone https://github.com/jito-labs/shredstream-proxy.git
+cd shredstorea,-proxy
+#启动
+RUST_LOG=info cargo run --release --bin jito-shredstream-proxy -- shredstream \
+    --block-engine-url https://mainnet.block-engine.jito.wtf \ //
+    --auth-keypair keypair.json \  //jito_shred 私钥
+    --desired-regions amsterdam,ny \  //要接受的区域
+    --dest-ip-ports 127.0.0.1:8001,10.0.0.1:8001
+    --grpc-service-port 9999
+```
 
-## 安装
+## Clinet安装
 
 ```bash
-git clone https://github.com/yourusername/jito-shredstream-client.git
+git clone https://github.com/vnxfsc/jito-shredstream-client.git
 cd jito-shredstream-client
 cargo build --release
 ```
@@ -54,7 +66,6 @@ cargo build --release
 - `SHREDSTREAM_SERVER_URL` - Jito Shredstream 服务器地址（默认为 "http://45.77.55.124:9999"）
 - `CREATE_ACCOUNT` - 创建代币交易相关的目标账户（默认为 "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"）
 - `SWAP_ACCOUNT` - Swap 交易相关的目标账户（默认为 "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"）
-- `TARGET_ACCOUNT` - 其他需要监控的账户地址
 
 项目还内置了对特定协议账户的监控：
 - Pump AMM 程序地址：`pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`
@@ -285,3 +296,18 @@ Pump协议交易解析:
 ----------------------------------------------
 ```
 
+## 联系方式
+
+- 交流群：[Buff社区](https://t.me/chainbuff)
+
+## 贡献指南
+
+1. Fork 项目
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 创建 Pull Request
+
+## 许可证
+
+MIT License
