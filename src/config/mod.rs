@@ -2,6 +2,9 @@ use std::env;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
+// 添加Pump AMM程序ID常量
+pub const PUMPAMM_PROGRAM_ID: &str = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+
 #[derive(Debug)]
 pub struct Config {
     pub server_url: String,
@@ -25,6 +28,11 @@ impl Default for Config {
         }
         
         if let Ok(pubkey) = Pubkey::from_str(&swap_account) {
+            accounts.push(pubkey);
+        }
+        
+        // 添加Pump AMM程序地址
+        if let Ok(pubkey) = Pubkey::from_str(PUMPAMM_PROGRAM_ID) {
             accounts.push(pubkey);
         }
         

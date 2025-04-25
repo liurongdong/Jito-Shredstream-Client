@@ -9,6 +9,7 @@ mod config;
 use client::ShredstreamClient;
 use config::Config;
 use transaction::{print_transaction_info, group_transactions_by_accounts};
+use transaction::pumpamm_parser::parse_pumpamm_transaction;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,9 +37,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         found_transactions = true;
                                         println!("\n找到账户 {} 的 {} 笔新交易 当前Slot:[{}]", account, transactions.len(), slot_entry.slot);
                                         
+                                        if account.to_string() == config::PUMPAMM_PROGRAM_ID {
+                                            println!("===== Pump AMM协议交易 =====");
+                                        }
+                                        
                                         for (index, transaction) in transactions.iter().enumerate() {
                                             println!("\n交易 {}:", index + 1);
                                             print_transaction_info(transaction);
+                                            
+                                            if account.to_string() == config::PUMPAMM_PROGRAM_ID {
+                                                let parsed_instructions = parse_pumpamm_transaction(transaction);
+                                                println!("\nPump AMM指令总数: {}", parsed_instructions.len());
+                                                
+                                                let has_create_pool = parsed_instructions.iter().any(|inst| inst.name == "CreatePool");
+                                                let has_deposit = parsed_instructions.iter().any(|inst| inst.name == "Deposit");
+                                                let has_buy = parsed_instructions.iter().any(|inst| inst.name == "Buy");
+                                                let has_sell = parsed_instructions.iter().any(|inst| inst.name == "Sell");
+                                                
+                                                if has_create_pool {
+                                                    println!("操作类型: 创建流动性池");
+                                                } else if has_deposit {
+                                                    println!("操作类型: 存入流动性");
+                                                } else if has_buy {
+                                                    println!("操作类型: 买入代币");
+                                                } else if has_sell {
+                                                    println!("操作类型: 卖出代币");
+                                                }
+                                            }
                                         }
                                     }
                                 }

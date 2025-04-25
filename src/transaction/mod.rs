@@ -7,6 +7,9 @@ use std::collections::HashMap;
 
 pub mod pump_parser;
 use pump_parser::{parse_pump_transaction, get_mint_from_transaction, get_bonding_curve_info, PUMP_PROGRAM_ID};
+// 添加Pump AMM协议支持
+pub mod pumpamm_parser;
+use pumpamm_parser::PUMPAMM_PROGRAM_ID;
 
 pub fn print_transaction_info(transaction: &VersionedTransaction) {
     println!("\n交易详情:");
@@ -118,6 +121,27 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
                     }
                 }
             },
+            // 添加对Pump AMM协议的支持
+            pumpamm_id if pumpamm_id == PUMPAMM_PROGRAM_ID => {
+                println!("    类型: Pump AMM协议指令");
+                
+                // 尝试解析Pump AMM指令
+                if let Some(parsed) = pumpamm_parser::parse_pumpamm_instruction(transaction, i) {
+                    println!("    操作: {}", parsed.name);
+                    println!("    内容: {}", parsed.params);
+                    
+                    // 打印相关池信息（如果有）
+                    if let Some(pool) = pumpamm_parser::get_pool_from_instruction(transaction, i) {
+                        println!("    池地址: {}", pool);
+                    }
+                    
+                    // 打印基础代币和报价代币信息（如果有）
+                    if let Some((base_mint, quote_mint)) = pumpamm_parser::get_token_mints_from_instruction(transaction, i) {
+                        println!("    基础代币: {}", base_mint);
+                        println!("    报价代币: {}", quote_mint);
+                    }
+                }
+            },
             _ => {
                 println!("    类型: 其他程序指令");
             }
@@ -150,6 +174,28 @@ pub fn print_transaction_info(transaction: &VersionedTransaction) {
             println!("  代币Mint: {}", curve_info.mint);
             println!("  曲线账户: {}", curve_info.curve_account);
             println!("  状态: {}", if curve_info.is_complete { "已完成" } else { "进行中" });
+        }
+    }
+    
+    // 添加Pump AMM协议交易解析
+    let parsed_pumpamm = pumpamm_parser::parse_pumpamm_transaction(transaction);
+    if !parsed_pumpamm.is_empty() {
+        println!("\nPump AMM协议交易解析:");
+        for (i, instruction) in parsed_pumpamm.iter().enumerate() {
+            println!("  Pump AMM指令 {}:", i + 1);
+            println!("    类型: {}", instruction.name);
+            println!("    详情: {}", instruction.params);
+        }
+        
+        // 添加池信息
+        if let Some(pool_info) = pumpamm_parser::get_pool_info_from_transaction(transaction) {
+            println!("\n池信息:");
+            println!("  池地址: {}", pool_info.pool);
+            println!("  基础代币: {}", pool_info.base_mint);
+            println!("  报价代币: {}", pool_info.quote_mint);
+            if let Some(lp_mint) = pool_info.lp_mint {
+                println!("  LP代币: {}", lp_mint);
+            }
         }
     }
 
