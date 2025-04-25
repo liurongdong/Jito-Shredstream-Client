@@ -41,7 +41,7 @@
 ## 服务端安装教程
 ```bash
 git clone https://github.com/jito-labs/shredstream-proxy.git
-cd shredstorea,-proxy
+cd shredstream-proxy
 #启动
 RUST_LOG=info cargo run --release --bin jito-shredstream-proxy -- shredstream \
     --block-engine-url https://mainnet.block-engine.jito.wtf \ //
