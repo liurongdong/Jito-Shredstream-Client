@@ -45,7 +45,7 @@ impl Default for Config {
             
         Self {
             server_url: env::var("SHREDSTREAM_SERVER_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:1820".to_string()),
+                .unwrap_or_else(|_| "http://127.0.0.1:18890".to_string()),
             target_accounts: accounts,
         }
     }
